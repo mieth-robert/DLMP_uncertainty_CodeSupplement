@@ -1,0 +1,8 @@
+"basecase_lv_noneg"
+ -----------------
+- 15 bus radial feeder
+- Source: Papavasilou (2016), "Analysis of Distribution Locational Marginal Prices", IEEE Trans. Smart Grid
+- Changes: 
+    - Two small DERs at busses 7 and 12
+    - Voltage levels at bus +/- 5% (instead of 10%)
+    - Removed negative load

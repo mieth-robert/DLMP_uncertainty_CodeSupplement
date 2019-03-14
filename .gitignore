@@ -1,0 +1,7 @@
+results/
+figures/
+old/
+*.sublime-project
+*.sublime-workspace
+*.out
+core
