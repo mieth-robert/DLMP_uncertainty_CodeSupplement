@@ -20,11 +20,13 @@ mutable struct Generator
    g_P_max::Float64
    g_Q_max::Float64
    cost::Float64
+   quad_cost::Float64
    function Generator(index, bus_idx, g_P_max, g_Q_max)
       g = new()
       g.index  = index
       g.bus_idx = bus_idx
       g.cost = 1.00
+      g.quad_cost = 0.00
       g.g_P_max = g_P_max
       g.g_Q_max = g_Q_max
       return g
@@ -226,8 +228,10 @@ function load_feeder(datadir)
       g_P_max = generators_raw[g, :p_max]
       g_Q_max = generators_raw[g, :q_max]
       cost = generators_raw[g, :cost]
+      quad_cost = generators_raw[g, :quad_cost]
       newg = Generator(index, bus_idx, g_P_max, g_Q_max)
       newg.cost = cost
+      newg.quad_cost = quad_cost
       buses[newg.bus_idx].generator = newg
       push!(generators, newg)
   end
