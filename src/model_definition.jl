@@ -168,6 +168,12 @@ function build_model(feeder::FeederTopo, settings::Dict)
 
     @objective(m, Min, linear_cost + r + variance_penalty)
 
-    return m 
+    meta = Dict(
+        "idx_to_bus" => idx_to_bus,
+        "bus_to_idx" => bus_to_idx,
+        "any_cc" => any_cc
+        )
+
+    return m, meta
 
 end
