@@ -38,8 +38,10 @@ function save_experiment(folder, experiment)
     for case in keys(experiment)
         println("Saving $(experiment[case]["verbose"])")
         
-        mkpath("results/$(folder)/$(timestamp)/")
-        CSV.write("results/$(folder)/$(timestamp)/$(experiment[case]["verbose"]).csv", experiment[case]["results"])
+        mkpath("results/$(folder)/all/$(timestamp)/")
+        mkpath("results/$(folder)/latest/")
+        CSV.write("results/$(folder)/all/$(timestamp)/$(experiment[case]["verbose"]).csv", experiment[case]["results"])
+        CSV.write("results/$(folder)/latest/$(experiment[case]["verbose"]).csv", experiment[case]["results"])
         # save("results/$(folder)/$(timestamp)/experiment_dict.jld", "experiment", experiment)
     end
     println(">>>> Saved with timestamp $timestamp")
