@@ -7,10 +7,12 @@ function results_to_df(m, meta, feeder)
     bus_set = collect(1:n_buses)
 
     any_cc = meta["any_cc"]
+    toggle_volt_cc = meta["toggle_volt_cc"]
     idx_to_bus = meta["idx_to_bus"]
     bus_to_idx = meta["bus_to_idx"]
 
 
+    # Results from calculations
     b_idx = []
     gp_res = []
     gq_res = []
@@ -23,6 +25,7 @@ function results_to_df(m, meta, feeder)
     gamma = []
     etas = []
     voltvar = []
+
 
     num_approx = 1e-7
 
@@ -53,7 +56,7 @@ function results_to_df(m, meta, feeder)
             push!(mu_plus, shadow_price(m[:μp][b]))
             push!(mu_minus, shadow_price(m[:μm][b]))
         end
-        if !any_cc || b == root_bus
+        if !toggle_volt_cc || b == root_bus
             push!(voltvar, 0)
             push!(etas, 0)
         else
@@ -61,12 +64,15 @@ function results_to_df(m, meta, feeder)
             push!(etas, shadow_price(m[:η][bus_to_idx[b]]))
         end
     end
+
     objective = zeros(n_buses)
     objective[root_bus] = objective_value(m)
+    objective_corrected = objective[root_bus]
     gamma = zeros(n_buses)
     if any_cc
         gamma[root_bus] = shadow_price(m[:γ])
     end
+
 
     results_df = DataFrame(
         objective = objective,
@@ -85,6 +91,41 @@ function results_to_df(m, meta, feeder)
         mu_minus = mu_minus,
         voltvar = voltvar,
     )
+
+
+    # DLMP Decomposition
+    lambda_a = []
+    rx_pi = []
+    rx_pi_a = []
+    r_sum_mu_d = []
+    for bus in feeder.buses
+        if bus.is_root
+            push!(lambda_a, 0)
+            push!(rx_pi, 0)
+            push!(rx_pi_a, 0)
+            push!(r_sum_mu_d, 0)
+        else
+            anc = bus.ancestor
+            cs = bus.children
+            push!(lambda_a, results_df[results_df[:bus] .== anc, :lambda][1])
+            
+            pi_i =  results_df[results_df[:bus] .== bus.index, :pi][1]
+            push!(rx_pi, pi_i * (feeder.line_to[bus.index].r / feeder.line_to[bus.index].x))
+            
+            pi_a = pi_i =  results_df[results_df[:bus] .== anc, :pi][1]
+            push!(rx_pi_a, pi_a * (feeder.line_to[bus.index].r / feeder.line_to[bus.index].x))
+
+            downstream = traverse(feeder, bus.index)
+            v = 2 * feeder.line_to[bus.index].r * sum((results_df[results_df[:bus] .== d, :mu_plus][1] - results_df[results_df[:bus] .== d, :mu_minus][1]) for d in downstream)
+            push!(r_sum_mu_d, v)
+        end
+    end
+  
+    results_df[:lambda_anc] = lambda_a
+    results_df[:rx_pi_i] = rx_pi
+    results_df[:rx_pi_a] = rx_pi_a
+    results_df[:r_sum_mu_d] = r_sum_mu_d
+
 
     return results_df
 end

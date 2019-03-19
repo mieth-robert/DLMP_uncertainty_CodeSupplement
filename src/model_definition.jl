@@ -51,8 +51,6 @@ function build_model(feeder::FeederTopo, settings::Dict)
     Σ_rt = Σ[2:end, 2:end]^(1/2)
     s = sqrt(sum(Σ_rt))
 
-
-
     # Build model
     any_cc = toggle_volt_cc || toggle_gen_cc
 
@@ -64,15 +62,16 @@ function build_model(feeder::FeederTopo, settings::Dict)
     @variable(m, fq[bus_set]) # reactive power flow
     @variable(m, gp[bus_set]) # active power generation
     @variable(m, gq[bus_set]) # reactive power generation
-    @variable(m, r >= 0) # quadratic part of cost function 
+    @variable(m, r_sched >= 0) # quadratic part of cost function 
     @variable(m, gp0_plus >= 0)
     @variable(m, gp0_minus >= 0)
 
     if any_cc
         @variable(m, α[bus_set] >=0) # Balancing Participation factor
+        @variable(m, r_bal >= 0) #   
     end
     if toggle_volt_cc
-        # additonal variables needed for voltage soc reformulation
+        # additional variables needed for voltage soc reformulation
         n = n_buses-1
         @variable(m, ρ[1:n]) 
         @variable(m, t[1:n] >=0)
@@ -150,30 +149,52 @@ function build_model(feeder::FeederTopo, settings::Dict)
     @constraint(m, θm[b=gen_buses], gq[b] >= -buses[b].generator.g_Q_max)
 
 
-    # Quadratic Objective as SOC
+    # Linear Part of objective
     @expression(m, linear_cost, sum(gp[b]*c[b] for b in non_root_buses) + c[root_bus]*(gp0_plus+gp0_plus))
+    
+    # Quadratic part of objective in as soc (see note below)
+    # No quadratic cost on substation
+    # quadratic cost term of substation is penalty for alpha to reduce deviation from schedule
+    F_schedule = copy(F)
+    F_schedule[root_bus, root_bus] = 0
     if any_cc
-        cost_soc = vcat(r, C'*gp + s.*C'*α)
+        cost_soc = vcat(r_sched, F_schedule'*gp)
+        bal_soc = vcat(r_bal, F'*α)
+        @constraint(m, bal_soc in SecondOrderCone())
+        @expression(m, quad_cost, r_sched + r_bal)
     else
-        cost_soc = vcat(r, C'*gp)
+        cost_soc = vcat(r_sched, s.*F_schedule'*gp)
+        @expression(m, quad_cost, r_sched)
     end
     @constraint(m, cost_soc in SecondOrderCone())
 
     # Variance penalty
-    if any_cc
+    if toggle_volt_cc
         @expression(m, variance_penalty, Ψ*sum(t))
     else
         @expression(m, variance_penalty, 0)
     end
 
-    @objective(m, Min, linear_cost + r + variance_penalty)
+    @objective(m, Min, linear_cost + quad_cost + variance_penalty)
 
     meta = Dict(
         "idx_to_bus" => idx_to_bus,
         "bus_to_idx" => bus_to_idx,
+        "toggle_volt_cc" => toggle_volt_cc,
+        "toggle_gen_cc" => toggle_gen_cc,
         "any_cc" => any_cc
         )
 
     return m, meta
 
 end
+
+
+
+
+# Note on quadratic objective:
+# The program is a conic program with quadratic objective. Usually solvers (like Mosek) do not allow a 
+# mixture of those two approaches. Therefore the quadratic objective has been reformulated as a second order 
+# cone constraint with linear objective rendering the whole problem in a SOC constrained problem with linear objective.
+# The original quadratic objective value can be recovered from r as:
+# corrected objective = linear_cost + 
