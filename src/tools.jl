@@ -25,7 +25,7 @@ function run_experiment(experiment)
         println(">>>> Model finished with status $status in $solvetime seconds")
 
         println(">>>> Post-Processing")
-        experiment[case]["model"] = m
+        # experiment[case]["model"] = m
         experiment[case]["results"] = results_to_df(m, meta, experiment[case]["feeder"])
         println("")
     end 
@@ -42,7 +42,8 @@ function save_experiment(folder, experiment)
         mkpath("results/$(folder)/latest/")
         CSV.write("results/$(folder)/all/$(timestamp)/$(experiment[case]["verbose"]).csv", experiment[case]["results"])
         CSV.write("results/$(folder)/latest/$(experiment[case]["verbose"]).csv", experiment[case]["results"])
-        # save("results/$(folder)/$(timestamp)/experiment_dict.jld", "experiment", experiment)
+
+        save("results/$(folder)/all/$(timestamp)/experiment_dict.jld", "experiment", experiment)
     end
     println(">>>> Saved with timestamp $timestamp")
 end
