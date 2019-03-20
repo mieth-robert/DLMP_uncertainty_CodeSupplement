@@ -127,13 +127,13 @@ function build_model(feeder::FeederTopo, settings::Dict)
         # NOTE: indices of constraints refer to non-root indices 
         @constraint(m, ζ[i=1:n], soc_vectors[i] in SecondOrderCone())
         @constraint(m, η[i=1:n], sum(R_check[i,ii] * ρ[ii] for ii in 1:n) == α[i])
-        @constraint(m, μp[b=non_root_buses], v[b] + 2*z_v*t[bus_to_idx[b]] <= buses[b].v_max*(1-vfac))
-        @constraint(m, μm[b=non_root_buses], -v[b] + 2*z_v*t[bus_to_idx[b]]  <= -buses[b].v_min*(1+vfac))
+        @constraint(m, μp[b=non_root_buses], v[b] + 2*z_v*t[bus_to_idx[b]] <= (vfac > 0 ? (1+vfac)^2 : buses[b].v_max))
+        @constraint(m, μm[b=non_root_buses], -v[b] + 2*z_v*t[bus_to_idx[b]] <= -(vfac > 0 ? (1-vfac)^2 : buses[b].v_min))
     else    
         idx_to_bus = collect(1:n_buses)
         bus_to_idx = collect(1:n_buses)
-        @constraint(m, μp[b=non_root_buses], v[b] <= buses[b].v_max*(1-vfac))
-        @constraint(m, μm[b=non_root_buses], v[b] >= buses[b].v_min*(1+vfac))
+        @constraint(m, μp[b=non_root_buses], v[b] <= (vfac > 0 ? (1+vfac)^2 : buses[b].v_max))
+        @constraint(m, μm[b=non_root_buses], v[b] >= (vfac > 0 ? (1-vfac)^2 : buses[b].v_min))
     end
 
 
