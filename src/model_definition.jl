@@ -32,6 +32,13 @@ function build_model(feeder::FeederTopo, settings::Dict)
     qcfac = settings["qcfac"]
     output_level = settings["output_level"]
     Ψ = settings["Ψ"]
+    if "loadfac" in keys(settings)
+        loadfac = settings["loadfac"]
+        buses = change_load_same_pf(buses, loadfac)
+    end
+
+
+
 
     # Build cost vector and matrices
     c = [] # linear cost vector
@@ -63,8 +70,6 @@ function build_model(feeder::FeederTopo, settings::Dict)
     @variable(m, gp[bus_set]) # active power generation
     @variable(m, gq[bus_set]) # reactive power generation
     @variable(m, r_sched >= 0) # quadratic part of cost function 
-    @variable(m, gp0_plus >= 0)
-    @variable(m, gp0_minus >= 0)
 
     if any_cc
         @variable(m, α[bus_set] >=0) # Balancing Participation factor
@@ -80,7 +85,6 @@ function build_model(feeder::FeederTopo, settings::Dict)
     # Energy Balances
     @constraint(m, λ[b=bus_set], buses[b].d_P - gp[b] + sum(fp[k] for k in buses[b].children) == fp[b])
     @constraint(m, π[b=bus_set], buses[b].d_Q - gq[b] + sum(fq[k] for k in buses[b].children) == fq[b])
-    @constraint(m, gp[root_bus] == gp0_plus - gp0_minus)
 
     non_root_buses = setdiff(bus_set, [root_bus])
 
@@ -150,7 +154,7 @@ function build_model(feeder::FeederTopo, settings::Dict)
 
 
     # Linear Part of objective
-    @expression(m, linear_cost, sum(gp[b]*c[b] for b in non_root_buses) + c[root_bus]*(gp0_plus+gp0_plus))
+    @expression(m, linear_cost, sum(gp[b]*c[b] for b in gen_buses))
     
     # Quadratic part of objective in as soc (see note below)
     # No quadratic cost on substation

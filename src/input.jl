@@ -249,9 +249,9 @@ function read_price_data(filename)
 end
 
 
-function change_load_same_pf(α)
+function change_load_same_pf(buses_in, α)
 # always uses the GLOBAL BUSES as reference
-   buses = deepcopy(BUSES)
+   buses = deepcopy(buses_in)
    for i in keys(buses)
       P = buses[i].d_P
       Q = buses[i].d_Q
