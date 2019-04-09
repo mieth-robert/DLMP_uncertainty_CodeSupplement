@@ -48,6 +48,7 @@ function save_experiment(folder, experiment)
     println(">>>> Saved with timestamp $timestamp")
 end
 
+# Get all downstream nodes of bus_idx
 function traverse(feeder, bus_idx; nodes=[])
     push!(nodes, bus_idx)
     if length(feeder.buses[bus_idx].children) > 0
@@ -56,4 +57,40 @@ function traverse(feeder, bus_idx; nodes=[])
         end
     end
     return nodes 
+end
+
+# Recursively get the loss active and reactive demand loss factors 
+# ∂l_i/∂d_k 
+function get_lQi_dk(feeder, results, i, k)
+    D = traverse(feeder, i)
+    if k in D
+        if feeder.buses[k].children == []
+            fPi_dk = 1
+            fQi_dk = 1
+        else        
+            fPi_dk = 1 + sum(get_lPi_dk(feeder, results, ii, k) for ii in setdiff(D, [i]))
+            fQi_dk = 1 + sum(get_lQi_dk(feeder, results, ii, k) for ii in setdiff(D, [i]))
+        end
+    else
+        fPi_dk = 0
+        fQi_dk = 0
+    end
+    return 2*(results[:fp][i]*fPi_dk + results[:fq][i]*fQi_dk) * (feeder.line_to[i].x / (results[:voltage][i])^2)
+end
+
+function get_lPi_dk(feeder, results, i, k)
+    D = traverse(feeder, i)
+    if k in D
+        if feeder.buses[k].children == []
+            fPi_dk = 1
+            fQi_dk = 1
+        else        
+            fPi_dk = 1 + sum(get_lPi_dk(feeder, results, ii, k) for ii in setdiff(D, [i]))
+            fQi_dk = 1 + sum(get_lQi_dk(feeder, results, ii, k) for ii in setdiff(D, [i]))
+        end
+    else
+        fPi_dk = 0
+        fQi_dk = 0
+    end
+    return 2*(results[:fp][i] * fPi_dk + results[:fq][i] * fQi_dk) * (feeder.line_to[i].r / (results[:voltage][i])^2)
 end

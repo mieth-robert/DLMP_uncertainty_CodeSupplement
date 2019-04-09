@@ -5,17 +5,24 @@ function results_to_df(m, meta, feeder)
     root_bus = feeder.root_bus
     gen_buses = feeder.gen_buses
     bus_set = collect(1:n_buses)
+    non_root_buses = setdiff(bus_set,[root_bus])
 
     any_cc = meta["any_cc"]
     toggle_volt_cc = meta["toggle_volt_cc"]
     idx_to_bus = meta["idx_to_bus"]
     bus_to_idx = meta["bus_to_idx"]
 
+    Rd = feeder.R
+    A = feeder.A[1:end, 2:end]
+    R = A'*Rd*A
+    R_check = R^-1
 
     # Results from calculations
     b_idx = []
     gp_res = []
     gq_res = []
+    fp_res = []
+    fq_res = []
     voltages = []
     alphas = []
     lambdas = []
@@ -23,6 +30,7 @@ function results_to_df(m, meta, feeder)
     delta_plus, delta_minus = [], []
     mu_plus, mu_minus = [], []
     gamma = []
+    rhos = []
     etas = []
     voltvar = []
 
@@ -52,16 +60,22 @@ function results_to_df(m, meta, feeder)
         if b == root_bus
             push!(mu_plus, 0)
             push!(mu_minus, 0)
+            push!(fp_res, 0)
+            push!(fq_res, 0)
         else
             push!(mu_plus, shadow_price(m[:μp][b]))
             push!(mu_minus, shadow_price(m[:μm][b]))
+            push!(fp_res, value(m[:fp][bus_to_idx[b]]))
+            push!(fq_res, value(m[:fq][bus_to_idx[b]]))
         end
         if !toggle_volt_cc || b == root_bus
             push!(voltvar, 0)
             push!(etas, 0)
+            push!(rhos, 0)
         else
             push!(voltvar, value(m[:t][bus_to_idx[b]]))
             push!(etas, shadow_price(m[:η][bus_to_idx[b]]))
+            push!(rhos, value(m[:ρ][bus_to_idx[b]]))
         end
     end
 
@@ -80,10 +94,13 @@ function results_to_df(m, meta, feeder)
         gp = gp_res,
         gq = gq_res,
         voltage = voltages,
+        fp = fp_res,
+        fq = fq_res,
         alpha = alphas,
         lambda = lambdas,
         pi = pies,
         gamma = gamma,
+        rho = rhos,
         eta = etas,
         delta_plus = delta_plus,
         delta_minus = delta_minus,
@@ -98,12 +115,14 @@ function results_to_df(m, meta, feeder)
     rx_pi = []
     rx_pi_a = []
     r_sum_mu_d = []
+    eta_calc = []
     for bus in feeder.buses
         if bus.is_root
             push!(lambda_a, 0)
             push!(rx_pi, 0)
             push!(rx_pi_a, 0)
             push!(r_sum_mu_d, 0)
+            push!(eta_calc, 0)
         else
             anc = bus.ancestor
             cs = bus.children
@@ -118,6 +137,13 @@ function results_to_df(m, meta, feeder)
             downstream = traverse(feeder, bus.index)
             v = 2 * feeder.line_to[bus.index].r * sum((results_df[results_df[:bus] .== d, :mu_plus][1] - results_df[results_df[:bus] .== d, :mu_minus][1]) for d in downstream)
             push!(r_sum_mu_d, v)
+
+            if toggle_volt_cc
+                e = 2 * meta["z_v"] * meta["s"] * sum(R[bus_to_idx[bus.index], bus_to_idx[j]] * (results_df[results_df[:bus] .== j, :mu_plus][1] + results_df[results_df[:bus] .== j, :mu_minus][1]) for j in non_root_buses)
+            else
+                e = 0
+            end
+            push!(eta_calc, e)
         end
     end
   
@@ -125,6 +151,7 @@ function results_to_df(m, meta, feeder)
     results_df[:rx_pi_i] = rx_pi
     results_df[:rx_pi_a] = rx_pi_a
     results_df[:r_sum_mu_d] = r_sum_mu_d
+    results_df[:eta_calc] = eta_calc
 
 
     return results_df

@@ -1,6 +1,12 @@
    
 function build_model(feeder::FeederTopo, settings::Dict)
 
+    # Paramters for thermal line flow approximation
+    # See "Distributed Generation Hosting Capacicty Evaluation for Distribution Systems Considering the Robust Optimal Operation of OLTC and SVC"
+    a1 = [1, 1, 0.2679, -0.2679, -1, -1, -1, -1, -0.2679, 0.2679, 1, 1]
+    a2 = [0.2679, 1, 1, 1, 1, 0.2679, -0.2679, -1, -1, -1, -1, -0.2679]
+    a3 = -1 .* [-1, -1.366, -1, -1, -1.366, -1, -1, -1.366, -1, -1, -1.366, -1]
+
     # Get and prepare feeder data 
     buses = feeder.buses
     lines = feeder.lines
@@ -8,11 +14,12 @@ function build_model(feeder::FeederTopo, settings::Dict)
     n_buses = feeder.n_buses
     root_bus = feeder.root_bus
     gen_buses = feeder.gen_buses
-    lines_to = feeder.line_to    
+    line_to = feeder.line_to    
     v_root = 1
 
     Rd = feeder.R
     A = feeder.A[1:end, 2:end]
+    A_check = A^-1
     R = A'*Rd*A
     R_check = R^(-1)
 
@@ -28,6 +35,8 @@ function build_model(feeder::FeederTopo, settings::Dict)
     z_v = settings["z_v"]
     toggle_volt_cc = settings["toggle_volt_cc"]
     toggle_gen_cc = settings["toggle_gen_cc"]
+    toggle_thermal_cc = settings["toggle_thermal_cc"]
+    thermal_const_method = settings["thermal_const_method"]
     vfac = settings["vfac"]
     qcfac = settings["qcfac"]
     output_level = settings["output_level"]
@@ -36,8 +45,6 @@ function build_model(feeder::FeederTopo, settings::Dict)
         loadfac = settings["loadfac"]
         buses = change_load_same_pf(buses, loadfac)
     end
-
-
 
 
     # Build cost vector and matrices
@@ -59,7 +66,7 @@ function build_model(feeder::FeederTopo, settings::Dict)
     s = sqrt(sum(Σ_rt))
 
     # Build model
-    any_cc = toggle_volt_cc || toggle_gen_cc
+    any_cc = toggle_volt_cc || toggle_gen_cc || toggle_thermal_cc
 
     m = Model(with_optimizer(Mosek.Optimizer, MSK_IPAR_LOG=output_level))
 
@@ -81,6 +88,13 @@ function build_model(feeder::FeederTopo, settings::Dict)
         @variable(m, ρ[1:n]) 
         @variable(m, t[1:n] >=0)
     end
+    if thermal_const_method == 2
+        # additional variable for thermal line flow soc reformulation
+        n = n_buses-1
+        @variable(m, ρ_f[1:n]) 
+        @variable(m, t_f[1:n] >=0)
+    end
+
 
     # Energy Balances
     @constraint(m, λ[b=bus_set], buses[b].d_P - gp[b] + sum(fp[k] for k in buses[b].children) == fp[b])
@@ -89,7 +103,7 @@ function build_model(feeder::FeederTopo, settings::Dict)
     non_root_buses = setdiff(bus_set, [root_bus])
 
     # Deterministic voltage equations
-    @constraint(m, β[b=non_root_buses], v[b] == v[buses[b].ancestor[1]] - 2*(lines_to[b].r * fp[b] + lines_to[b].x * fq[b]))
+    @constraint(m, β[b=non_root_buses], v[b] == v[buses[b].ancestor[1]] - 2*(line_to[b].r * fp[b] + line_to[b].x * fq[b]))
 
     # Substation Constraints
     @constraint(m, v[root_bus] == v_root)
@@ -112,7 +126,7 @@ function build_model(feeder::FeederTopo, settings::Dict)
     if  toggle_volt_cc
         # Voltage Chance Constraints
         eΣ_rt = Array(e'*Σ_rt)
-        RΣ_rt = Array(R'*Σ_rt)
+        RΣ_rt = Array(R*Σ_rt)
         soc_vectors = []
         idx_to_bus = Dict()
         bus_to_idx = Dict()
@@ -127,6 +141,7 @@ function build_model(feeder::FeederTopo, settings::Dict)
         # NOTE: indices of constraints refer to non-root indices 
         @constraint(m, ζ[i=1:n], soc_vectors[i] in SecondOrderCone())
         @constraint(m, η[i=1:n], sum(R_check[i,ii] * ρ[ii] for ii in 1:n) == α[i])
+        # @constraint(m, η[i=1:n], sum(R[i,ii] * α[ii] for ii in 1:n) == ρ[i])
         @constraint(m, μp[b=non_root_buses], v[b] + 2*z_v*t[bus_to_idx[b]] <= (vfac > 0 ? (1+vfac)^2 : buses[b].v_max))
         @constraint(m, μm[b=non_root_buses], -v[b] + 2*z_v*t[bus_to_idx[b]] <= -(vfac > 0 ? (1-vfac)^2 : buses[b].v_min))
     else    
@@ -151,6 +166,35 @@ function build_model(feeder::FeederTopo, settings::Dict)
     # Reactive Power Constraints
     @constraint(m, θp[b=gen_buses], gq[b] <= buses[b].generator.g_Q_max)
     @constraint(m, θm[b=gen_buses], gq[b] >= -buses[b].generator.g_Q_max)
+
+    # constaints on thermal line capacity 
+    if toggle_thermal_cc
+        # Line Limit Chance Concstraints
+        eΣ_rt = Array(e'*Σ_rt)
+        AΣ_rt = Array(A*Σ_rt)
+        soc_vectors_f = []
+        idx_to_bus = Dict()
+        bus_to_idx = Dict()
+        for (i, b) in enumerate(non_root_buses)
+            idx_to_bus[i] = b
+            bus_to_idx[b] = i
+            y_f = AΣ_rt[i,:] - ρ_f[i].*eΣ_rt'
+            soc = vcat(t_f[i], y_f)
+            soc = vec(soc)
+            push!(soc_vectors_f, soc)
+        end
+        @constraint(m, ζ_f[i=1:n], soc_vectors_f[i] in SecondOrderCone())
+        @constraint(m, η_f[i=1:n], sum(A_check[i,ii] * ρ_f[ii] for ii in 1:n) == α[i])
+        @constraint(m, τ[b=setdiff(bus_set,[root_bus]), c=1:12], a1[c]*(fp[b] + t_f[bus_to_idx[b]]) + a2[c]*fq[b] <= a3[c]*line_to[b].s_max)
+    else
+        if thermal_const_method == 1
+            @constraint(m, τ[b=setdiff(bus_set,[root_bus])], [line_to[b].s_max, fp[b], fq[b]] in SecondOrderCone())
+        elseif thermal_const_method == 2
+            @constraint(m, τ[b=setdiff(bus_set,[root_bus]), c=1:12], a1[c]*fp[b] + a2[c]*fq[b] <= a3[c]*line_to[b].s_max)
+        else
+            @warn("Thermal constraint method $(thermal_const_method) unknown. Proceeding with unconstrained lines.")
+        end
+    end
 
 
     # Linear Part of objective
@@ -181,12 +225,15 @@ function build_model(feeder::FeederTopo, settings::Dict)
 
     @objective(m, Min, linear_cost + quad_cost + variance_penalty)
 
+    # Some info to send to results handling, not super elegant but I leave it for now
     meta = Dict(
         "idx_to_bus" => idx_to_bus,
         "bus_to_idx" => bus_to_idx,
         "toggle_volt_cc" => toggle_volt_cc,
         "toggle_gen_cc" => toggle_gen_cc,
-        "any_cc" => any_cc
+        "any_cc" => any_cc,
+        "z_v" => z_v,
+        "s" => s,
         )
 
     return m, meta
