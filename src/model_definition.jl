@@ -63,7 +63,7 @@ function build_model(feeder::FeederTopo, settings::Dict)
 
     # Prepare cc matrices
     Σ_rt = Σ[2:end, 2:end]^(1/2)
-    s = sqrt(sum(Σ_rt))
+    s = sqrt(sum(Σ[2:end, 2:end]))
 
     # Build model
     any_cc = toggle_volt_cc || toggle_gen_cc || toggle_thermal_cc
@@ -97,8 +97,8 @@ function build_model(feeder::FeederTopo, settings::Dict)
 
 
     # Energy Balances
-    @constraint(m, λ[b=bus_set], buses[b].d_P - gp[b] + sum(fp[k] for k in buses[b].children) == fp[b])
-    @constraint(m, π[b=bus_set], buses[b].d_Q - gq[b] + sum(fq[k] for k in buses[b].children) == fq[b])
+    @constraint(m, λ[b=bus_set], fp[b] + gp[b] - sum(fp[k] for k in buses[b].children) == buses[b].d_P)
+    @constraint(m, π[b=bus_set], fq[b] + gq[b] - sum(fq[k] for k in buses[b].children) == buses[b].d_Q)
 
     non_root_buses = setdiff(bus_set, [root_bus])
 
@@ -125,23 +125,23 @@ function build_model(feeder::FeederTopo, settings::Dict)
     # Deterministic Voltage Constraints
     if  toggle_volt_cc
         # Voltage Chance Constraints
-        eΣ_rt = Array(e'*Σ_rt)
-        RΣ_rt = Array(R*Σ_rt)
         soc_vectors = []
         idx_to_bus = Dict()
         bus_to_idx = Dict()
+        eΣ_rt = Array(e'*Σ_rt)
         for (i, b) in enumerate(non_root_buses)
             idx_to_bus[i] = b
             bus_to_idx[b] = i
-            y = RΣ_rt[i,:] - ρ[i].*eΣ_rt'
-            soc = vcat(t[i], y)
+            RΣ_rt = Array(R[i,:]' * Σ_rt)
+            y = RΣ_rt + ρ[i] .* eΣ_rt
+            soc = vcat(t[i], y')
             soc = vec(soc)
             push!(soc_vectors, soc)
         end
         # NOTE: indices of constraints refer to non-root indices 
         @constraint(m, ζ[i=1:n], soc_vectors[i] in SecondOrderCone())
-        @constraint(m, η[i=1:n], sum(R_check[i,ii] * ρ[ii] for ii in 1:n) == α[i])
-        # @constraint(m, η[i=1:n], sum(R[i,ii] * α[ii] for ii in 1:n) == ρ[i])
+        @constraint(m, ν[i=1:n], sum(R_check[i,ii] * ρ[ii] for ii in 1:n) == α[idx_to_bus[i]])
+        # @constraint(m, η[i=1:n], sum(R[i,ii] * α[idx_to_bus[ii]] for ii in 1:n) == ρ[i])
         @constraint(m, μp[b=non_root_buses], v[b] + 2*z_v*t[bus_to_idx[b]] <= (vfac > 0 ? (1+vfac)^2 : buses[b].v_max))
         @constraint(m, μm[b=non_root_buses], -v[b] + 2*z_v*t[bus_to_idx[b]] <= -(vfac > 0 ? (1-vfac)^2 : buses[b].v_min))
     else    
@@ -178,19 +178,20 @@ function build_model(feeder::FeederTopo, settings::Dict)
         for (i, b) in enumerate(non_root_buses)
             idx_to_bus[i] = b
             bus_to_idx[b] = i
-            y_f = AΣ_rt[i,:] - ρ_f[i].*eΣ_rt'
+            y_f = AΣ_rt[i,:] + ρ_f[i].*eΣ_rt'
             soc = vcat(t_f[i], y_f)
             soc = vec(soc)
             push!(soc_vectors_f, soc)
         end
         @constraint(m, ζ_f[i=1:n], soc_vectors_f[i] in SecondOrderCone())
         @constraint(m, η_f[i=1:n], sum(A_check[i,ii] * ρ_f[ii] for ii in 1:n) == α[i])
-        @constraint(m, τ[b=setdiff(bus_set,[root_bus]), c=1:12], a1[c]*(fp[b] + t_f[bus_to_idx[b]]) + a2[c]*fq[b] <= a3[c]*line_to[b].s_max)
+        @constraint(m, ηp[b=non_root_buses, c=1:12], a1[c]*(fp[b] + t_f[bus_to_idx[b]]) + a2[c]*fq[b] <= a3[c]*line_to[b].s_max)
+        @constraint(m, ηm[b=non_root_buses, c=1:12], a1[c]*(fp[b] - t_f[bus_to_idx[b]]) + a2[c]*fq[b] <= a3[c]*line_to[b].s_max)
     else
         if thermal_const_method == 1
-            @constraint(m, τ[b=setdiff(bus_set,[root_bus])], [line_to[b].s_max, fp[b], fq[b]] in SecondOrderCone())
+            @constraint(m, η[b=non_root_buses], [line_to[b].s_max, fp[b], fq[b]] in SecondOrderCone())
         elseif thermal_const_method == 2
-            @constraint(m, τ[b=setdiff(bus_set,[root_bus]), c=1:12], a1[c]*fp[b] + a2[c]*fq[b] <= a3[c]*line_to[b].s_max)
+            @constraint(m, η[b=non_root_buses, c=1:12], a1[c]*fp[b] + a2[c]*fq[b] <= a3[c]*line_to[b].s_max)
         else
             @warn("Thermal constraint method $(thermal_const_method) unknown. Proceeding with unconstrained lines.")
         end
@@ -231,17 +232,17 @@ function build_model(feeder::FeederTopo, settings::Dict)
         "bus_to_idx" => bus_to_idx,
         "toggle_volt_cc" => toggle_volt_cc,
         "toggle_gen_cc" => toggle_gen_cc,
+        "toggle_thermal_cc" => toggle_thermal_cc,
+        "thermal_const_method" => thermal_const_method,
         "any_cc" => any_cc,
         "z_v" => z_v,
         "s" => s,
+        "Σ" => Σ,
         )
 
     return m, meta
 
 end
-
-
-
 
 # Note on quadratic objective:
 # The program is a conic program with quadratic objective. Usually solvers (like Mosek) do not allow a 

@@ -1,7 +1,6 @@
 function run_single_case(feeder, casesettings)
     println(">>>> Building Model")
     m, meta = build_model(feeder, casesettings)
-
     println(">>>> Running Model")
     solvetime = @elapsed optimize!(m)
     status = termination_status(m)
@@ -18,7 +17,6 @@ function run_experiment(experiment)
         println("Running $(experiment[case]["verbose"])")
         println(">>>> Building Model")
         m, meta = build_model(experiment[case]["feeder"], experiment[case]["settings"])
-
         println(">>>> Running Model")
         solvetime = @elapsed optimize!(m)
         status = termination_status(m)

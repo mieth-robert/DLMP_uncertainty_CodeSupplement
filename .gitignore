@@ -5,3 +5,4 @@ old/
 *.sublime-workspace
 *.out
 core
+.ipynb_checkpoints/
