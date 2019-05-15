@@ -1,3 +1,21 @@
+# Copyright (c) 2019 Robert Mieth
+# Code supplement to the paper "Distribution Electricity Pricing under Uncertainty" by Robert Mieth and Yury Dvorkin
+#
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+# The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+# +++++
+# tools.jl
+#
+# Provides auxiallary functions
+# +++++
+# Devnotes: ---
+
+
+
+# Build, run and process a single model run
 function run_single_case(feeder, casesettings)
     println(">>>> Building Model")
     m, meta = build_model(feeder, casesettings)
@@ -12,6 +30,7 @@ function run_single_case(feeder, casesettings)
 end
 
 
+# Build, run and process a multiple runs from the experiment dict
 function run_experiment(experiment) 
     for case in keys(experiment)
         println("Running $(experiment[case]["verbose"])")
@@ -31,6 +50,7 @@ function run_experiment(experiment)
 end
    
 
+# Save all results of the experiment
 function save_experiment(folder, experiment)
     timestamp = Dates.format(Dates.now(), "yymmdd_HHMM")
     for case in keys(experiment)
@@ -46,6 +66,7 @@ function save_experiment(folder, experiment)
     println(">>>> Saved with timestamp $timestamp")
 end
 
+
 # Get all downstream nodes of bus_idx
 function traverse(feeder, bus_idx; nodes=[])
     push!(nodes, bus_idx)
@@ -57,38 +78,3 @@ function traverse(feeder, bus_idx; nodes=[])
     return nodes 
 end
 
-# Recursively get the loss active and reactive demand loss factors 
-# ∂l_i/∂d_k 
-function get_lQi_dk(feeder, results, i, k)
-    D = traverse(feeder, i)
-    if k in D
-        if feeder.buses[k].children == []
-            fPi_dk = 1
-            fQi_dk = 1
-        else        
-            fPi_dk = 1 + sum(get_lPi_dk(feeder, results, ii, k) for ii in setdiff(D, [i]))
-            fQi_dk = 1 + sum(get_lQi_dk(feeder, results, ii, k) for ii in setdiff(D, [i]))
-        end
-    else
-        fPi_dk = 0
-        fQi_dk = 0
-    end
-    return 2*(results[:fp][i]*fPi_dk + results[:fq][i]*fQi_dk) * (feeder.line_to[i].x / (results[:voltage][i])^2)
-end
-
-function get_lPi_dk(feeder, results, i, k)
-    D = traverse(feeder, i)
-    if k in D
-        if feeder.buses[k].children == []
-            fPi_dk = 1
-            fQi_dk = 1
-        else        
-            fPi_dk = 1 + sum(get_lPi_dk(feeder, results, ii, k) for ii in setdiff(D, [i]))
-            fQi_dk = 1 + sum(get_lQi_dk(feeder, results, ii, k) for ii in setdiff(D, [i]))
-        end
-    else
-        fPi_dk = 0
-        fQi_dk = 0
-    end
-    return 2*(results[:fp][i] * fPi_dk + results[:fq][i] * fQi_dk) * (feeder.line_to[i].r / (results[:voltage][i])^2)
-end
