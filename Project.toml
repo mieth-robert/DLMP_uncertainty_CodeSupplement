@@ -7,3 +7,6 @@ JLD = "4138dd39-2aa7-5051-a626-17a0bb65d9c8"
 JuMP = "4076af6c-e467-56ae-b986-b466b2749572"
 Mosek = "6405355b-0ac2-5fba-af84-adbd65488c0e"
 MosekTools = "1ec41992-ff65-5c91-ac43-2df89e9693a4"
+
+[compat]
+julia = "1.1"
